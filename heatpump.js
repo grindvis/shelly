@@ -47,179 +47,89 @@
  * OFF: http://192.168.1.181/script/1/thermostat_off
  */
 
-// ============================================================================
+// -----------------------------------------------------------------------------
 // CONFIGURATION
-// ============================================================================
+// -----------------------------------------------------------------------------
 
 let CONFIG = {
-
-  // Relay controlling the heat pump
   switchId: 0,
 
-  // Continue heating after thermostat OFF
+  // Shelly running this script
+  heatPumpShellyIp: "192.168.1.20",
+
+  // Keep heat pump running after thermostat OFF
   holdTimeSec: 15 * 60,
 
   // Minimum OFF time before restart
-  cooldownTimeSec: 10 * 60,
-
-  debug: true
+  cooldownTimeSec: 10 * 60
 };
 
-// ============================================================================
-// NETWORK
-// ============================================================================
-
-let NETWORK = {
-
-  // IP address of this Shelly
-  heatPumpShellyIp: "192.168.1.181",
-
-  // Thermostat Shelly (documentation only)
-  thermostatShellyIp: "192.168.1.180"
-};
-
-// ============================================================================
+// -----------------------------------------------------------------------------
 // STATE
-// ============================================================================
+// -----------------------------------------------------------------------------
 
 let thermostatDemand = false;
-
 let holdTimer = null;
-let delayedStartTimer = null;
-
-// Timestamp when cooldown ends (Unix seconds)
+let startTimer = null;
 let cooldownUntil = 0;
 
-// ============================================================================
-// LOGGING
-// ============================================================================
+// -----------------------------------------------------------------------------
+// HELPERS
+// -----------------------------------------------------------------------------
 
-function log(msg) {
-
-  if (CONFIG.debug) {
-    print("[HP] " + msg);
-  }
-}
-
-// ============================================================================
-// RELAY
-// ============================================================================
-
-function relayState() {
-
-  let status =
-    Shelly.getComponentStatus(
-      "switch:" + CONFIG.switchId
-    );
-
-  return status.output;
+function now() {
+  let sys = Shelly.getComponentStatus("sys");
+  return sys.unixtime;
 }
 
 function heatPumpOn() {
-
-  if (relayState()) {
-    return;
-  }
-
-  Shelly.call(
-    "Switch.Set",
-    {
-      id: CONFIG.switchId,
-      on: true
-    }
-  );
-
-  log("Heat pump ON");
+  Shelly.call("Switch.Set", {
+    id: CONFIG.switchId,
+    on: true
+  });
 }
 
 function heatPumpOff() {
-
-  if (!relayState()) {
-    return;
-  }
-
-  Shelly.call(
-    "Switch.Set",
-    {
-      id: CONFIG.switchId,
-      on: false
-    }
-  );
-
-  log("Heat pump OFF");
+  Shelly.call("Switch.Set", {
+    id: CONFIG.switchId,
+    on: false
+  });
 }
 
-// ============================================================================
-// TIMER HELPERS
-// ============================================================================
-
-function cancelHoldTimer() {
-
-  if (holdTimer !== null) {
-
-    Timer.clear(holdTimer);
-    holdTimer = null;
-
-    log("Hold timer cancelled");
+function cancelTimer(timerId) {
+  if (timerId !== null) {
+    Timer.clear(timerId);
   }
+  return null;
 }
 
-function cancelDelayedStartTimer() {
-
-  if (delayedStartTimer !== null) {
-
-    Timer.clear(delayedStartTimer);
-    delayedStartTimer = null;
-
-    log("Delayed start cancelled");
-  }
-}
-
-// ============================================================================
+// -----------------------------------------------------------------------------
 // THERMOSTAT ON
-// ============================================================================
+// -----------------------------------------------------------------------------
 
 function thermostatOn() {
 
-  log("Thermostat ON");
-
   thermostatDemand = true;
 
-  cancelHoldTimer();
+  holdTimer = cancelTimer(holdTimer);
 
-  let now =
-    Math.floor(Date.now() / 1000);
+  let remainingCooldown = cooldownUntil - now();
 
-  // Cooldown active
-  if (now < cooldownUntil) {
+  if (remainingCooldown > 0) {
 
-    let remaining =
-      cooldownUntil - now;
+    startTimer = cancelTimer(startTimer);
 
-    cancelDelayedStartTimer();
-
-    delayedStartTimer = Timer.set(
-      remaining * 1000,
+    startTimer = Timer.set(
+      remainingCooldown * 1000,
       false,
       function () {
 
-        delayedStartTimer = null;
+        startTimer = null;
 
         if (thermostatDemand) {
-
-          log(
-            "Cooldown finished, starting heat pump"
-          );
-
           heatPumpOn();
         }
       }
-    );
-
-    log(
-      "Cooldown active, delayed start in " +
-      remaining +
-      " seconds"
     );
 
     return;
@@ -228,10 +138,63 @@ function thermostatOn() {
   heatPumpOn();
 }
 
-// ============================================================================
+// -----------------------------------------------------------------------------
 // THERMOSTAT OFF
-// ============================================================================
+// -----------------------------------------------------------------------------
 
 function thermostatOff() {
 
-  log("Thermostat OFF");
+  thermostatDemand = false;
+
+  startTimer = cancelTimer(startTimer);
+  holdTimer = cancelTimer(holdTimer);
+
+  holdTimer = Timer.set(
+    CONFIG.holdTimeSec * 1000,
+    false,
+    function () {
+
+      holdTimer = null;
+
+      if (thermostatDemand) {
+        return;
+      }
+
+      heatPumpOff();
+
+      cooldownUntil =
+        now() + CONFIG.cooldownTimeSec;
+    }
+  );
+}
+
+// -----------------------------------------------------------------------------
+// WEBHOOKS
+// -----------------------------------------------------------------------------
+
+HTTPServer.registerEndpoint("on", function (req, res) {
+
+  thermostatOn();
+
+  res.code = 200;
+  res.body = "OK";
+  res.send();
+});
+
+HTTPServer.registerEndpoint("off", function (req, res) {
+
+  thermostatOff();
+
+  res.code = 200;
+  res.body = "OK";
+  res.send();
+});
+
+// -----------------------------------------------------------------------------
+// STARTUP
+// -----------------------------------------------------------------------------
+
+print("Heat Pump Cycle Manager started");
+print("Configure thermostat webhooks:");
+print("ON  -> http://" + CONFIG.heatPumpShellyIp + "/script/1/on");
+print("OFF -> http://" + CONFIG.heatPumpShellyIp + "/script/1/off");
