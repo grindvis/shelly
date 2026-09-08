@@ -55,7 +55,7 @@ let CONFIG = {
   switchId: 0,
 
   // Shelly running this script
-  heatPumpShellyIp: "192.168.1.20",
+  heatPumpShellyIp: "192.168.1.181",
 
   // Keep heat pump running after thermostat OFF
   holdTimeSec: 15 * 60,
