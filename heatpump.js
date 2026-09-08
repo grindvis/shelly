@@ -43,8 +43,8 @@
 
 /**
  * Thermostat webhook configuration:
- * ON: http://192.168.1.20/script/1/thermostat_on
- * OFF: http://192.168.1.20/script/1/thermostat_off
+ * ON: http://192.168.1.181/script/1/thermostat_on
+ * OFF: http://192.168.1.181/script/1/thermostat_off
  */
 
 // ============================================================================
