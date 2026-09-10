@@ -251,9 +251,9 @@ HTTPServer.registerEndpoint("warmtepomp_uit", function(request, response) {
 
 });
 
-
 // Elke uur controleren of de UNI nog bereikbaar is
 Timer.set(60 * 60 * 1000, true, thermostatWatchdog);
+
 // Logging
 console.log("========================================");
 console.log("Vertraagde uitschakeling van warmtepomp gestart");
