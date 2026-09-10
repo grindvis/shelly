@@ -57,35 +57,35 @@
  */
 
 var THERM_IP = "[ip-adres thermostaat]"; // IP-adres van de Shelly Uni/thermostaat
+
 var VERTRAGING_MS = 15 * 60 * 1000; // 15 minuten
-//Voor testen (5 seconden)
-//var VERTRAGING_MS = 5000; // 5 seconden
+// Voor testen:
+// var VERTRAGING_MS = 5000; // 5 seconden
+
 var offTimer = null;
-// Timer voor het geval de thermostaat niet reageert (bijvoorbeeld door een netwerkstoring).
-// Zodat de thermostaat niet te lang de warmtepomp aan laat staan.
-var COMM_FAIL_LIMIT = 4;   // 4 uur
+
+// Communicatie-watchdog
+var COMM_FAIL_LIMIT = 4; // 4 uur
 var commFailCount = 0;
+
+// Geeft aan of er actieve warmtevraag is
 var thermostatActive = false;
 
-
 // ------------------------------------------------------------
-// Zet Mini AAN and cancel UIT
+// Zet warmtepomp AAN en annuleer eventuele UIT-timer
 // ------------------------------------------------------------
 function thermOn() {
   console.log("Thermostaat AAN ontvangen");
 
-  // Reset watchdog teller
   thermostatActive = true;
   commFailCount = 0;
-  
-  // Cancel UIT timer
+
   if (offTimer !== null) {
     Timer.clear(offTimer);
     offTimer = null;
     console.log("Vertraagde uitschakeling geannuleerd");
   }
 
-  // Zet relay AAN
   Shelly.call("Switch.Set", {
     id: 0,
     on: true
@@ -94,37 +94,39 @@ function thermOn() {
     if (error_code !== 0) {
       console.log("FOUT bij het inschakelen van het relais: " + error_message);
     } else {
-      console.log("Thermostaat is AAN");
+      console.log("Warmtepomp AAN");
     }
+
   });
 }
 
-
 // ------------------------------------------------------------
-// Thermostaat is UIT - start vertraagd uitschakelen 
+// Thermostaat UIT ontvangen
 // ------------------------------------------------------------
 function thermOff() {
+  console.log("Thermostaat UIT ontvangen");
 
-  // Reset watchdog teller
   thermostatActive = false;
   commFailCount = 0;
 
-  console.log("Thermostaat UIT ontvangen");
-  // Als er al een timer is, annuleer deze
   if (offTimer !== null) {
     Timer.clear(offTimer);
     offTimer = null;
   }
+
   console.log("Start vertraagde uitschakeling van 15 minuten");
+
   offTimer = Timer.set(VERTRAGING_MS, false, function() {
     offTimer = null;
-    console.log("15 minuten zijn voorbij, controleer status van de thermostaat");
+
+    console.log("15 minuten verstreken, controleer thermostaatstatus");
+
     checkthermState();
   });
 }
 
 // ------------------------------------------------------------
-// Bevraag de status van de thermostaat
+// Controleer actuele thermostaatstatus
 // ------------------------------------------------------------
 function checkthermState() {
 
@@ -132,33 +134,41 @@ function checkthermState() {
     url: "http://" + THERM_IP + "/status",
     timeout: 10
   }, function(result, error_code, error_message) {
+
     if (error_code !== 0) {
       console.log("ERROR bevragen thermostaat: " + error_message);
       return;
     }
+
     if (!result || !result.body) {
       console.log("ERROR: Thermostaat geeft geen reactie");
       return;
     }
+
     var status;
+
     try {
       status = JSON.parse(result.body);
     } catch (e) {
       console.log("ERROR parsing thermostaat reactie");
       return;
     }
+
     if (!status.inputs || status.inputs.length < 1) {
       console.log("ERROR: Kon Input 1 niet vinden in thermostaatstatus");
       return;
     }
 
     var thermIsOn = (status.inputs[0].input === 1);
+
     console.log("Thermostaat is " + (thermIsOn ? "AAN" : "UIT"));
+
     if (thermIsOn) {
 
-      // Thermostaat ingeschakeld gedurende de vertraagde uitschakeling van 15 minuten 
-      // Hou de warmtepomp AAN.
-      console.log("Thermostaat is AAN, houd de warmtepomp AAN");
+      thermostatActive = true;
+      commFailCount = 0;
+
+      console.log("Thermostaat is weer AAN, houd de warmtepomp AAN");
 
       Shelly.call("Switch.Set", {
         id: 0,
@@ -167,30 +177,31 @@ function checkthermState() {
 
     } else {
 
-      // Thermostaat is nog steeds uit na 15 minuten.
-      // Zet de warmtepomp uit.
-      console.log("Thermostaat is nog steeds uit - zet de warmtepomp uit");
+      thermostatActive = false;
+      commFailCount = 0;
+
+      console.log("Thermostaat is nog steeds UIT, zet warmtepomp UIT");
 
       Shelly.call("Switch.Set", {
         id: 0,
         on: false
       });
+
     }
 
   });
 }
 
 // ------------------------------------------------------------
-// Controleer of de thermostaat bereikbaar is (watchdog)
+// Watchdog: controleer elk uur of thermostaat bereikbaar is
 // ------------------------------------------------------------
 function thermostatWatchdog() {
 
-  // Alleen de watchdog starten als de thermostaat actief is
   if (!thermostatActive) {
     commFailCount = 0;
     return;
   }
-  
+
   Shelly.call("HTTP.GET", {
     url: "http://" + THERM_IP + "/status",
     timeout: 10
@@ -214,6 +225,8 @@ function thermostatWatchdog() {
           "Thermostaat meer dan 4 uur onbereikbaar -> warmtepomp UIT"
         );
 
+        thermostatActive = false;
+
         if (offTimer !== null) {
           Timer.clear(offTimer);
           offTimer = null;
@@ -228,53 +241,62 @@ function thermostatWatchdog() {
       return;
     }
 
-    // Communicatie werkt weer
     if (commFailCount > 0) {
       console.log("Thermostaat weer bereikbaar");
     }
 
     commFailCount = 0;
+
   });
 }
 
-
 // ------------------------------------------------------------
-// HTTP endpoint: /script/1/warmtepomp_aan
-//
-// Aangeroepen door de thermostaat (Shelly therm) als IN1 aan gaat 
+// HTTP endpoint: warmtepomp aan
 // ------------------------------------------------------------
 HTTPServer.registerEndpoint("warmtepomp_aan", function(request, response) {
 
   thermOn();
 
   response.code = 200;
-  response.body = "OK - Warmtepomp AAN, vertraagde uitschakeling geannuleerd";
+  response.body =
+    "OK - Warmtepomp AAN, vertraagde uitschakeling geannuleerd";
   response.send();
 
 });
 
-
 // ------------------------------------------------------------
-// HTTP endpoint: /script/1/warmtepomp_uit
-//
-// Aangeroepen door de thermostaat (Shelly Uni) als IN1 uit gaat 
+// HTTP endpoint: warmtepomp uit
 // ------------------------------------------------------------
 HTTPServer.registerEndpoint("warmtepomp_uit", function(request, response) {
 
   thermOff();
 
   response.code = 200;
-  response.body = "OK - vertraagde uitschakeling van 15 minuten gestart";
+  response.body =
+    "OK - Vertraagde uitschakeling van 15 minuten gestart";
   response.send();
 
 });
 
-// Elke uur controleren of de UNI nog bereikbaar is
-Timer.set(60 * 60 * 1000, true, thermostatWatchdog);
+// ------------------------------------------------------------
+// Elk uur watchdog uitvoeren
+// ------------------------------------------------------------
+Timer.set(
+  60 * 60 * 1000,
+  true,
+  thermostatWatchdog
+);
 
+// ------------------------------------------------------------
 // Logging
+// ------------------------------------------------------------
 console.log("========================================");
-console.log("Vertraagde uitschakeling van warmtepomp gestart");
+console.log("Vertraagde uitschakeling warmtepomp gestart");
 console.log("Thermostaat IP: " + THERM_IP);
-console.log("Vertraagde uitschakeling: 15 minuten");
+console.log(
+  "Vertraagde uitschakeling: " +
+  (VERTRAGING_MS / 60000) +
+  " minuten"
+);
+console.log("Watchdog timeout: " + COMM_FAIL_LIMIT + " uur");
 console.log("========================================");
