@@ -50,11 +50,13 @@
 
 /**
  * Thermostat webhook configuratie:
- * ON: http://192.168.1.181/script/1/warmtepomp_aan
- * OFF: http://192.168.1.181/script/1/warmtepomp_uit
+ * Stel onderstaande URL's in als webhooks in de thermostaat (Shelly UNI) om de 
+ * warmtepomp te schakelen. Let op: kies de juiste switch, de UNI heeft er twee.
+ * ON: http://[ip-adres warmtepomp relais]/script/1/warmtepomp_aan
+ * OFF: http://[ip-adres warmtepomp relais]/script/1/warmtepomp_uit
  */
 
-var UNI_IP = "192.168.132.180";
+var UNI_IP = "[ip-adres thermostaat]"; // IP-adres van de Shelly Uni/thermostaat
 var OFF_DELAY_MS = 15 * 60 * 1000; // 15 minuten
 //Voor testen (5 seconden)
 //var OFF_DELAY_MS = 5000; // 5 seconden
@@ -88,7 +90,7 @@ function uniOn() {
 
 
 // ------------------------------------------------------------
-// Uni ging UIT - start vertraagd uitschakelen 
+// Thermostaat is UIT - start vertraagd uitschakelen 
 // ------------------------------------------------------------
 function uniOff() {
   console.log("Thermostaat UIT ontvangen");
@@ -106,7 +108,7 @@ function uniOff() {
 }
 
 // ------------------------------------------------------------
-// Query the original Shelly Uni
+// Bevraag de status van de thermostaat
 // ------------------------------------------------------------
 function checkUniState() {
 
@@ -139,7 +141,7 @@ function checkUniState() {
     if (uniIsOn) {
 
       // Thermostaat ingeschakeld gedurende de vertraagde uitschakeling van 15 minuten 
-      // Keep Mini ON.
+      // Hou de warmtepomp AAN.
       console.log("Thermostaat is AAN, houd de warmtepomp AAN");
 
       Shelly.call("Switch.Set", {
