@@ -56,16 +56,20 @@
  * OFF: http://[ip-adres warmtepomp relais]/script/1/warmtepomp_uit
  */
 
-var UNI_IP = "[ip-adres thermostaat]"; // IP-adres van de Shelly Uni/thermostaat
-var OFF_DELAY_MS = 15 * 60 * 1000; // 15 minuten
+var THERM_IP = "[ip-adres thermostaat]"; // IP-adres van de Shelly Uni/thermostaat
+var VERTRAGING_MS = 15 * 60 * 1000; // 15 minuten
 //Voor testen (5 seconden)
-//var OFF_DELAY_MS = 5000; // 5 seconden
+//var VERTRAGING_MS = 5000; // 5 seconden
 var offTimer = null;
+// Timer voor het geval de thermostaat niet reageert (bijvoorbeeld door een netwerkstoring).
+// Zodat de thermostaat niet te lang de warmtepomp aan laat staan.
+var COMM_FAIL_LIMIT = 4;   // 4 uur
+var commFailCount = 0;
 
 // ------------------------------------------------------------
 // Zet Mini AAN and cancel UIT
 // ------------------------------------------------------------
-function uniOn() {
+function thermOn() {
   console.log("Thermostaat AAN ontvangen");
   // Cancel UIT timer
   if (offTimer !== null) {
@@ -81,7 +85,7 @@ function uniOn() {
   }, function(result, error_code, error_message) {
 
     if (error_code !== 0) {
-      console.log("FOUT bij het aanschakelen van het relais: " + error_message);
+      console.log("FOUT bij het inschakelen van het relais: " + error_message);
     } else {
       console.log("Thermostaat is AAN");
     }
@@ -92,7 +96,7 @@ function uniOn() {
 // ------------------------------------------------------------
 // Thermostaat is UIT - start vertraagd uitschakelen 
 // ------------------------------------------------------------
-function uniOff() {
+function thermOff() {
   console.log("Thermostaat UIT ontvangen");
   // Als er al een timer is, annuleer deze
   if (offTimer !== null) {
@@ -100,20 +104,20 @@ function uniOff() {
     offTimer = null;
   }
   console.log("Start vertraagde uitschakeling van 15 minuten");
-  offTimer = Timer.set(OFF_DELAY_MS, false, function() {
+  offTimer = Timer.set(VERTRAGING_MS, false, function() {
     offTimer = null;
     console.log("15 minuten zijn voorbij, controleer status van de thermostaat");
-    checkUniState();
+    checkthermState();
   });
 }
 
 // ------------------------------------------------------------
 // Bevraag de status van de thermostaat
 // ------------------------------------------------------------
-function checkUniState() {
+function checkthermState() {
 
   Shelly.call("HTTP.GET", {
-    url: "http://" + UNI_IP + "/status",
+    url: "http://" + THERM_IP + "/status",
     timeout: 10
   }, function(result, error_code, error_message) {
     if (error_code !== 0) {
@@ -121,24 +125,24 @@ function checkUniState() {
       return;
     }
     if (!result || !result.body) {
-      console.log("ERROR: Uni returned no response body");
+      console.log("ERROR: Thermostaat geeft geen reactie");
       return;
     }
     var status;
     try {
       status = JSON.parse(result.body);
     } catch (e) {
-      console.log("ERROR parsing Uni response");
+      console.log("ERROR parsing thermostaat reactie");
       return;
     }
     if (!status.inputs || status.inputs.length < 1) {
-      console.log("ERROR: Could not find Uni IN1");
+      console.log("ERROR: Kon Input 1 niet vinden in thermostaatstatus");
       return;
     }
 
-    var uniIsOn = (status.inputs[0].input === 1);
-    console.log("Thermostaat is " + (uniIsOn ? "AAN" : "UIT"));
-    if (uniIsOn) {
+    var thermIsOn = (status.inputs[0].input === 1);
+    console.log("Thermostaat is " + (thermIsOn ? "AAN" : "UIT"));
+    if (thermIsOn) {
 
       // Thermostaat ingeschakeld gedurende de vertraagde uitschakeling van 15 minuten 
       // Hou de warmtepomp AAN.
@@ -164,15 +168,66 @@ function checkUniState() {
   });
 }
 
+// ------------------------------------------------------------
+// Controleer of de thermostaat bereikbaar is (watchdog)
+// ------------------------------------------------------------
+function thermostatWatchdog() {
+
+  Shelly.call("HTTP.GET", {
+    url: "http://" + THERM_IP + "/status",
+    timeout: 10
+  }, function(result, error_code, error_message) {
+
+    if (error_code !== 0 || !result || !result.body) {
+
+      commFailCount++;
+
+      console.log(
+        "Thermostaat niet bereikbaar (" +
+        commFailCount +
+        "/" +
+        COMM_FAIL_LIMIT +
+        ")"
+      );
+
+      if (commFailCount >= COMM_FAIL_LIMIT) {
+
+        console.log(
+          "Thermostaat meer dan 4 uur onbereikbaar -> warmtepomp UIT"
+        );
+
+        if (offTimer !== null) {
+          Timer.clear(offTimer);
+          offTimer = null;
+        }
+
+        Shelly.call("Switch.Set", {
+          id: 0,
+          on: false
+        });
+      }
+
+      return;
+    }
+
+    // Communicatie werkt weer
+    if (commFailCount > 0) {
+      console.log("Thermostaat weer bereikbaar");
+    }
+
+    commFailCount = 0;
+  });
+}
+
 
 // ------------------------------------------------------------
 // HTTP endpoint: /script/1/warmtepomp_aan
 //
-// Aangeroepen door de thermostaat (Shelly Uni) als IN1 aan gaat 
+// Aangeroepen door de thermostaat (Shelly therm) als IN1 aan gaat 
 // ------------------------------------------------------------
 HTTPServer.registerEndpoint("warmtepomp_aan", function(request, response) {
 
-  uniOn();
+  thermOn();
 
   response.code = 200;
   response.body = "OK - Warmtepomp AAN, vertraagde uitschakeling geannuleerd";
@@ -188,7 +243,7 @@ HTTPServer.registerEndpoint("warmtepomp_aan", function(request, response) {
 // ------------------------------------------------------------
 HTTPServer.registerEndpoint("warmtepomp_uit", function(request, response) {
 
-  uniOff();
+  thermOff();
 
   response.code = 200;
   response.body = "OK - vertraagde uitschakeling van 15 minuten gestart";
@@ -196,8 +251,12 @@ HTTPServer.registerEndpoint("warmtepomp_uit", function(request, response) {
 
 });
 
+
+// Elke uur controleren of de UNI nog bereikbaar is
+Timer.set(60 * 60 * 1000, true, thermostatWatchdog);
+// Logging
 console.log("========================================");
 console.log("Vertraagde uitschakeling van warmtepomp gestart");
-console.log("Thermostaat IP: " + UNI_IP);
+console.log("Thermostaat IP: " + THERM_IP);
 console.log("Vertraagde uitschakeling: 15 minuten");
 console.log("========================================");
