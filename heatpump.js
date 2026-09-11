@@ -57,19 +57,12 @@
  */
 
 var THERM_IP = "[ip-adres thermostaat]"; // IP-adres van de Shelly Uni/thermostaat
-
 var VERTRAGING_MS = 15 * 60 * 1000; // 15 minuten
-// Voor testen:
-// var VERTRAGING_MS = 5000; // 5 seconden
-
-var offTimer = null;
-
-// Communicatie-watchdog
-var COMM_FAIL_LIMIT = 4; // 4 uur
-var commFailCount = 0;
-
-// Geeft aan of er actieve warmtevraag is
-var thermostatActive = false;
+// var VERTRAGING_MS = 5000; // 5 seconden, voor testen
+var offTimer = null; // Communicatie-watchdog
+var COMM_FAIL_LIMIT = 15; // 5 uur: elke 20 min wordt gecontroleerd of de thermostaat bereikbaar is
+var commFailCount = 0; // Start van de teller voor communicatieproblemen (watchdog)
+var thermostatActive = false;// Geeft aan of er actieve warmtevraag is
 
 // ------------------------------------------------------------
 // Zet warmtepomp AAN en annuleer eventuele UIT-timer
@@ -279,10 +272,10 @@ HTTPServer.registerEndpoint("warmtepomp_uit", function(request, response) {
 });
 
 // ------------------------------------------------------------
-// Elk uur watchdog uitvoeren
+// Elke 20 minuten watchdog uitvoeren (check of thermostaat bereikbaar is)
 // ------------------------------------------------------------
 Timer.set(
-  60 * 60 * 1000,
+  20 * 60 * 1000,
   true,
   thermostatWatchdog
 );
