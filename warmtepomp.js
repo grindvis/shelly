@@ -58,9 +58,11 @@
 
 var THERM_IP = "[ip-adres thermostaat]"; // IP-adres van de Shelly Uni/thermostaat
 var VERTRAGING_MS = 15 * 60 * 1000; // 15 minuten
+var FAILSAFE_MS = 5 * 60 * 60 * 1000; // 5 uur
 //Voor testen (5 seconden)
 //var VERTRAGING_MS = 5000; // 5 seconden
 var offTimer = null;
+var failsafeTimer = null;
 // Timer voor het geval de thermostaat niet reageert (bijvoorbeeld door een netwerkstoring).
 // Zodat de thermostaat niet te lang de warmtepomp aan laat staan.
 var COMM_FAIL_LIMIT = 4;   // 4 uur
@@ -76,6 +78,11 @@ function thermOn() {
     Timer.clear(offTimer);
     offTimer = null;
     console.log("Vertraagde uitschakeling geannuleerd");
+  }
+  if (failsafeTimer !== null) {
+    Timer.clear(failsafeTimer);
+    failsafeTimer = null;
+    console.log("Failsafe uitschakeling geannuleerd");
   }
 
   // Zet relay AAN
@@ -108,6 +115,24 @@ function thermOff() {
     offTimer = null;
     console.log("15 minuten zijn voorbij, controleer status van de thermostaat");
     checkthermState();
+  });
+
+  if (failsafeTimer !== null) {
+    Timer.clear(failsafeTimer);
+  }
+  failsafeTimer = Timer.set(FAILSAFE_MS, false, function() {
+    failsafeTimer = null;
+    console.log("5 uur zijn voorbij - failsafe schakelt de warmtepomp UIT");
+
+    if (offTimer !== null) {
+      Timer.clear(offTimer);
+      offTimer = null;
+    }
+
+    Shelly.call("Switch.Set", {
+      id: 0,
+      on: false
+    });
   });
 }
 
