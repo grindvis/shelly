@@ -58,15 +58,11 @@
 
 var THERM_IP = "[ip-adres thermostaat]"; // IP-adres van de Shelly Uni/thermostaat
 var VERTRAGING_MS = 15 * 60 * 1000; // 15 minuten
-var FAILSAFE_MS = 5 * 60 * 60 * 1000; // 5 uur
+var FAILSAFE_MS = 1 * 60 * 60 * 1000; // 1 uur
 //Voor testen (5 seconden)
 //var VERTRAGING_MS = 5000; // 5 seconden
 var offTimer = null;
 var failsafeTimer = null;
-// Timer voor het geval de thermostaat niet reageert (bijvoorbeeld door een netwerkstoring).
-// Zodat de thermostaat niet te lang de warmtepomp aan laat staan.
-var COMM_FAIL_LIMIT = 4;   // 4 uur
-var commFailCount = 0;
 
 // ------------------------------------------------------------
 // Zet Mini AAN and cancel UIT
@@ -122,7 +118,7 @@ function thermOff() {
   }
   failsafeTimer = Timer.set(FAILSAFE_MS, false, function() {
     failsafeTimer = null;
-    console.log("5 uur zijn voorbij - failsafe schakelt de warmtepomp UIT");
+    console.log("1 uur zijn voorbij - failsafe schakelt de warmtepomp UIT");
 
     if (offTimer !== null) {
       Timer.clear(offTimer);
@@ -194,58 +190,6 @@ function checkthermState() {
 }
 
 // ------------------------------------------------------------
-// Controleer of de thermostaat bereikbaar is (watchdog)
-// ------------------------------------------------------------
-function thermostatWatchdog() {
-
-  Shelly.call("HTTP.GET", {
-    url: "http://" + THERM_IP + "/status",
-    timeout: 10
-  }, function(result, error_code, error_message) {
-
-    if (error_code !== 0 || !result || !result.body) {
-
-      commFailCount++;
-
-      console.log(
-        "Thermostaat niet bereikbaar (" +
-        commFailCount +
-        "/" +
-        COMM_FAIL_LIMIT +
-        ")"
-      );
-
-      if (commFailCount >= COMM_FAIL_LIMIT) {
-
-        console.log(
-          "Thermostaat meer dan 4 uur onbereikbaar -> warmtepomp UIT"
-        );
-
-        if (offTimer !== null) {
-          Timer.clear(offTimer);
-          offTimer = null;
-        }
-
-        Shelly.call("Switch.Set", {
-          id: 0,
-          on: false
-        });
-      }
-
-      return;
-    }
-
-    // Communicatie werkt weer
-    if (commFailCount > 0) {
-      console.log("Thermostaat weer bereikbaar");
-    }
-
-    commFailCount = 0;
-  });
-}
-
-
-// ------------------------------------------------------------
 // HTTP endpoint: /script/1/warmtepomp_aan
 //
 // Aangeroepen door de thermostaat (Shelly therm) als IN1 aan gaat 
@@ -275,9 +219,6 @@ HTTPServer.registerEndpoint("warmtepomp_uit", function(request, response) {
   response.send();
 
 });
-
-// Elke uur controleren of de UNI nog bereikbaar is
-Timer.set(60 * 60 * 1000, true, thermostatWatchdog);
 
 // Logging
 console.log("========================================");
