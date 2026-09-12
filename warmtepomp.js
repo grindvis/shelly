@@ -220,7 +220,9 @@ HTTPServer.registerEndpoint("warmtepomp_uit", function(request, response) {
 
 });
 
+// ------------------------------------------------------------
 // Logging
+// ------------------------------------------------------------
 console.log("========================================");
 console.log("Vertraagde uitschakeling van warmtepomp gestart");
 console.log("Thermostaat IP: " + THERM_IP);
